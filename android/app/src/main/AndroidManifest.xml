@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="key_gen_school_app"
+        android:label="key_gen_school"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
