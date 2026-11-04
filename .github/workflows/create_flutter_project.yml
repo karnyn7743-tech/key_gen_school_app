@@ -23,8 +23,8 @@ jobs:
       - name: Generate Flutter Project
         run: |
           flutter create . \
-            --project-name school_app \
-            --org com.schoolcontrol \
+            --project-name key_gen_school_app \
+            --org com.key_schoolcontrol \
             --platforms android,ios
 
       - name: Save Project Files
