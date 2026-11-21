@@ -54,29 +54,26 @@ jobs:
         run: flutter analyze --no-pub --no-fatal-infos
 
       - name: Build Release APK
+        run: flutter build apk --release --verbose
+
+      - name: Locate and Verify APK
         shell: bash
         run: |
-          cd android
-          ./gradlew :app:assembleRelease
-          cd ..
           mkdir -p build/app/outputs/flutter-apk
-          APK="$(find android/app/build/outputs -type f -name '*.apk' -print -quit)"
+          APK="$(find . -type f -path '*/outputs/*' -name '*.apk' -print -quit)"
           if [ -z "$APK" ]; then
-            echo "Gradle completed but no APK was found. Listing Android build outputs:"
-            find android/app/build/outputs -maxdepth 6 -type f -print || true
+            echo "Flutter build finished but no APK was found. Listing APK outputs:"
+            find . -type f -name '*.apk' -print || true
+            echo "Listing Android app output directories:"
+            find android/app/build/outputs -maxdepth 7 -print 2>/dev/null || true
             exit 1
           fi
-          cp "$APK" build/app/outputs/flutter-apk/app-release.apk
-          echo "APK copied from: $APK"
+          if [ "$APK" != "build/app/outputs/flutter-apk/app-release.apk" ]; then
+            cp "$APK" build/app/outputs/flutter-apk/app-release.apk
+          fi
+          test -s build/app/outputs/flutter-apk/app-release.apk
+          file build/app/outputs/flutter-apk/app-release.apk
           ls -lh build/app/outputs/flutter-apk/app-release.apk
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          APK="build/app/outputs/flutter-apk/app-release.apk"
-          test -s "$APK"
-          file "$APK"
-          ls -lh "$APK"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
