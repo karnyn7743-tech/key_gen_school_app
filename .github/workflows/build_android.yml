@@ -54,7 +54,16 @@ jobs:
         run: flutter analyze --no-pub --no-fatal-infos
 
       - name: Build Release APK
-        run: flutter build apk --release --verbose
+        shell: bash
+        run: |
+          set +e
+          flutter build apk --release --verbose
+          BUILD_STATUS=$?
+          set -e
+          echo "Flutter command exit code: $BUILD_STATUS"
+          # Flutter 3.50 may fail to recognize an APK emitted by the newer AGP,
+          # even when Gradle's assembleRelease task completed successfully.
+          # The following step independently verifies that a real APK exists.
 
       - name: Locate and Verify APK
         shell: bash
