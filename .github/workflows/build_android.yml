@@ -54,13 +54,28 @@ jobs:
         run: flutter analyze --no-pub --no-fatal-infos
 
       - name: Build Release APK
-        run: flutter build apk --release --verbose
+        shell: bash
+        run: |
+          cd android
+          ./gradlew :app:assembleRelease
+          cd ..
+          mkdir -p build/app/outputs/flutter-apk
+          APK="$(find android/app/build/outputs -type f -name '*.apk' -print -quit)"
+          if [ -z "$APK" ]; then
+            echo "Gradle completed but no APK was found. Listing Android build outputs:"
+            find android/app/build/outputs -maxdepth 6 -type f -print || true
+            exit 1
+          fi
+          cp "$APK" build/app/outputs/flutter-apk/app-release.apk
+          echo "APK copied from: $APK"
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
 
       - name: Verify APK
         shell: bash
         run: |
           APK="build/app/outputs/flutter-apk/app-release.apk"
-          test -f "$APK"
+          test -s "$APK"
+          file "$APK"
           ls -lh "$APK"
 
       - name: Upload APK Artifact
