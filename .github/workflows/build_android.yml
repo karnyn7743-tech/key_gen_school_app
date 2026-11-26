@@ -79,14 +79,19 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          set +e
-          flutter build apk --release --verbose
-          BUILD_STATUS=$?
-          set -e
-          echo "Flutter command exit code: $BUILD_STATUS"
-          # Some Flutter/AGP combinations may return a non-zero Flutter wrapper
-          # status after Gradle has emitted the APK. The next step validates the APK
-          # and its exact signing certificate; an absent or incorrectly signed APK fails.
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "Release build attempt $attempt of 3"
+            if flutter build apk --release --verbose; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Build failed; waiting 30 seconds before retry (transient dependency repository errors may recover)."
+              sleep 30
+            fi
+          done
+          echo "Release APK build failed after 3 attempts."
+          exit 1
 
       - name: Locate and Verify APK and Signing Certificate
         shell: bash
@@ -96,28 +101,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/app/outputs/flutter-apk
-          APK="$(find android/app/build/outputs -type f -name '*.apk' -print -quit)"
-          if [ -z "$APK" ]; then
-            echo "No APK was produced."
-            find . -type f -name '*.apk' -print || true
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+          if [ ! -s "$APK_PATH" ]; then
+            echo "Flutter did not produce the expected APK: $APK_PATH"
+            find build -type f -name '*.apk' -print 2>/dev/null || true
             exit 1
           fi
-          cp "$APK" build/app/outputs/flutter-apk/app-release.apk
-          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
-          test -s "$APK_PATH"
+
           BUILD_TOOLS_VERSION="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
           APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner"
           "$APKSIGNER" verify --verbose "$APK_PATH"
 
-          # Derive the expected certificate digest directly from the configured
-          # keystore, then capture apksigner output from both stdout and stderr.
           EXPECTED_DIGEST="$(keytool -exportcert -keystore android/app/keygen-upload-keystore.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" | sha256sum | awk '{print tolower($1)}')"
           CERT_OUTPUT="$("$APKSIGNER" verify --print-certs "$APK_PATH" 2>&1)"
-          CERT_DIGEST="$(printf '%s\n' "$CERT_OUTPUT" | sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]:]+).*/\1/p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          CERT_DIGEST="$(printf '%s\\n' "$CERT_OUTPUT" | grep -i 'certificate SHA-256 digest:' | head -n 1 | sed 's/.*digest: *//' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
 
           if [ -z "$CERT_DIGEST" ]; then
-            echo "Could not extract the APK signing certificate digest."
-            printf '%s\n' "$CERT_OUTPUT"
+            echo "Could not extract APK signing certificate digest. Tool output follows:"
+            printf '%s\\n' "$CERT_OUTPUT"
             exit 1
           fi
           if [ "$CERT_DIGEST" != "$EXPECTED_DIGEST" ]; then
