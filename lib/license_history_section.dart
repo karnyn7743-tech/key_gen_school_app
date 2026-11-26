@@ -14,10 +14,17 @@ class LicenseHistorySection extends StatefulWidget {
 class _LicenseHistorySectionState extends State<LicenseHistorySection> {
   final _registry = RegistryService();
   final _generator = LicenseGeneratorService();
+  final _legacyDeviceController = TextEditingController();
   List<Map<String, dynamic>> _trials = [];
   List<Map<String, dynamic>> _permanent = [];
   bool _loading = true;
   String? _error;
+
+  @override
+  void dispose() {
+    _legacyDeviceController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -81,6 +88,27 @@ class _LicenseHistorySectionState extends State<LicenseHistorySection> {
     }
   }
 
+  Future<void> _restorePermanentFromDeviceId() async {
+    final id = _legacyDeviceController.text.trim();
+    if (id.isEmpty) return;
+    try {
+      final code = _generator.generatePermanentCode(id);
+      await _registry.addPermanent(
+        deviceId: id,
+        code: code,
+        createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      );
+      _legacyDeviceController.clear();
+      await _load();
+      await _copy(code);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر استعادة المفتاح الدائم: $e')),
+      );
+    }
+  }
+
   String _date(dynamic seconds) {
     if (seconds is! int) return 'غير محدد';
     final d = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
@@ -119,6 +147,25 @@ class _LicenseHistorySectionState extends State<LicenseHistorySection> {
               Text('مفاتيح التجربة: ${_trials.length}  |  المفاتيح الدائمة: ${_permanent.length}',
                   style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
+              const Text('استعادة مفتاح دائم قديم من معرّف الجهاز',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _legacyDeviceController,
+                textDirection: TextDirection.ltr,
+                textAlign: TextAlign.center,
+                decoration: const InputDecoration(
+                  hintText: 'أدخل Device ID القديم',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 6),
+              OutlinedButton.icon(
+                onPressed: _restorePermanentFromDeviceId,
+                icon: const Icon(Icons.restore),
+                label: const Text('إعادة توليد المفتاح الدائم ونسخه'),
+              ),
+              const Divider(height: 20),
               if (_trials.isEmpty && _permanent.isEmpty)
                 const Text('لا توجد مفاتيح مسجلة حتى الآن.'),
               ..._trials.map((record) => ListTile(
