@@ -20,6 +20,7 @@ class BackupService {
       'createdAt': DateTime.now().toUtc().toIso8601String(),
       'privateSeed': await _generator.exportPrivateSeedForBackup(),
       'registry': await _registry.readAll(),
+      'permanentRegistry': await _registry.readPermanentAll(),
     };
     final salt = _randomBytes(16);
     final nonce = _randomBytes(12);
@@ -60,7 +61,8 @@ class BackupService {
     final payload = jsonDecode(utf8.decode(clearBytes));
     if (payload is! Map || payload['format'] != 'schoolapp-keygen-backup' ||
         payload['version'] != 1 || payload['privateSeed'] is! String ||
-        payload['registry'] is! List) {
+        payload['registry'] is! List ||
+        (payload['permanentRegistry'] != null && payload['permanentRegistry'] is! List)) {
       throw const FormatException('محتويات النسخة الاحتياطية غير مكتملة.');
     }
 
@@ -68,7 +70,13 @@ class BackupService {
         .map((item) => Map<String, dynamic>.from(item as Map))
         .toList();
     // نتحقق من سجل الأجهزة أولاً، ثم نعيد مفتاح التوقيع.
+    final permanentRecords = payload['permanentRegistry'] == null
+        ? <Map<String, dynamic>>[]
+        : (payload['permanentRegistry'] as List)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
     await _registry.replaceAll(records);
+    await _registry.replacePermanentAll(permanentRecords);
     await _generator.restorePrivateSeed(payload['privateSeed'] as String);
   }
 
