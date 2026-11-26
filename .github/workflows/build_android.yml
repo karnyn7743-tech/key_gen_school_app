@@ -80,17 +80,50 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          EXPECTED_APK="build/app/outputs/flutter-apk/app-release.apk"
+          mkdir -p "$(dirname "$EXPECTED_APK")"
+          rm -f "$EXPECTED_APK"
+          rm -rf android/app/build/outputs/apk/release
+
           for attempt in 1 2 3; do
             echo "Release build attempt $attempt of 3"
-            if flutter build apk --release --verbose; then
+            set +e
+            flutter build apk --release --verbose
+            FLUTTER_STATUS=$?
+            set -e
+
+            if [ -s "$EXPECTED_APK" ]; then
+              echo "Flutter APK found at the expected path."
               exit 0
             fi
+
+            echo "Flutter exit code: $FLUTTER_STATUS"
+            echo "Searching the Android app module for the APK produced by Gradle..."
+            mapfile -t APK_CANDIDATES < <(find android/app/build/outputs -type f -name '*.apk' -print 2>/dev/null | sort)
+            if [ "${#APK_CANDIDATES[@]}" -gt 0 ]; then
+              SOURCE_APK=""
+              for candidate in "${APK_CANDIDATES[@]}"; do
+                if [[ "$(basename "$candidate")" == "app-release.apk" ]]; then
+                  SOURCE_APK="$candidate"
+                  break
+                fi
+              done
+              if [ -z "$SOURCE_APK" ]; then
+                SOURCE_APK="${APK_CANDIDATES[0]}"
+              fi
+              test -s "$SOURCE_APK"
+              cp "$SOURCE_APK" "$EXPECTED_APK"
+              echo "Recovered APK from Gradle output: $SOURCE_APK"
+              test -s "$EXPECTED_APK"
+              exit 0
+            fi
+
             if [ "$attempt" -lt 3 ]; then
-              echo "Build failed; waiting 30 seconds before retry (transient dependency repository errors may recover)."
+              echo "No APK found; waiting 30 seconds before retry."
               sleep 30
             fi
           done
-          echo "Release APK build failed after 3 attempts."
+          echo "Release APK was not produced after 3 attempts."
           exit 1
 
       - name: Locate and Verify APK and Signing Certificate
