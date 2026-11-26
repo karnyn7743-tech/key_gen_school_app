@@ -53,36 +53,70 @@ jobs:
       - name: Analyze Dart
         run: flutter analyze --no-pub --no-fatal-infos
 
+      - name: Decode and Validate Release Keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo "Missing KEYSTORE_BASE64"; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "Missing KEYSTORE_PASSWORD"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "Missing KEY_ALIAS"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "Missing KEY_PASSWORD"; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/keygen-upload-keystore.jks
+          test -s android/app/keygen-upload-keystore.jks
+          keytool -list -keystore android/app/keygen-upload-keystore.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          echo "Release keystore and alias validated."
+
       - name: Build Release APK
         shell: bash
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/android/app/keygen-upload-keystore.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set +e
           flutter build apk --release --verbose
           BUILD_STATUS=$?
           set -e
           echo "Flutter command exit code: $BUILD_STATUS"
-          # Flutter 3.50 may fail to recognize an APK emitted by the newer AGP,
-          # even when Gradle's assembleRelease task completed successfully.
-          # The following step independently verifies that a real APK exists.
+          # Some Flutter/AGP combinations may return a non-zero Flutter wrapper
+          # status after Gradle has emitted the APK. The next step validates the APK
+          # and its exact signing certificate; an absent or incorrectly signed APK fails.
 
-      - name: Locate and Verify APK
+      - name: Locate and Verify APK and Signing Certificate
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p build/app/outputs/flutter-apk
-          APK="$(find . -type f -path '*/outputs/*' -name '*.apk' -print -quit)"
+          APK="$(find android/app/build/outputs -type f -name '*.apk' -print -quit)"
           if [ -z "$APK" ]; then
-            echo "Flutter build finished but no APK was found. Listing APK outputs:"
+            echo "No APK was produced."
             find . -type f -name '*.apk' -print || true
-            echo "Listing Android app output directories:"
-            find android/app/build/outputs -maxdepth 7 -print 2>/dev/null || true
             exit 1
           fi
-          if [ "$APK" != "build/app/outputs/flutter-apk/app-release.apk" ]; then
-            cp "$APK" build/app/outputs/flutter-apk/app-release.apk
-          fi
+          cp "$APK" build/app/outputs/flutter-apk/app-release.apk
           test -s build/app/outputs/flutter-apk/app-release.apk
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner" verify --verbose build/app/outputs/flutter-apk/app-release.apk
+          CERT_DIGEST="$("$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print tolower($2)}')"
+          EXPECTED_DIGEST="072dcc321b2bbd21ec64f78830a8192063c2e148e4591761356cfd06a4d970a4"
+          if [ "$CERT_DIGEST" != "$EXPECTED_DIGEST" ]; then
+            echo "APK signing certificate does not match the configured permanent release key."
+            echo "Actual certificate SHA-256: $CERT_DIGEST"
+            exit 1
+          fi
+          echo "APK signature and expected release certificate verified."
           file build/app/outputs/flutter-apk/app-release.apk
           ls -lh build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Remove Signing Keystore
+        if: always()
+        shell: bash
+        run: rm -f android/app/keygen-upload-keystore.jks
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
