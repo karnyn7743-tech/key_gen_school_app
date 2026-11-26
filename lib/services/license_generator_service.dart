@@ -61,6 +61,32 @@ class LicenseGeneratorService {
     return token;
   }
 
+  Future<String> recreateTrialCode(Map<String, dynamic> record) async {
+    final deviceId = record['deviceId'];
+    final issuedAt = record['issuedAt'];
+    final expiresAt = record['expiresAt'];
+    final licenseId = record['licenseId'];
+    if (deviceId is! String || deviceId.trim().isEmpty ||
+        issuedAt is! int || expiresAt is! int ||
+        licenseId is! String || licenseId.isEmpty) {
+      throw const FormatException('بيانات سجل التجربة لا تكفي لإعادة تكوين المفتاح.');
+    }
+    // ترتيب الحقول وصيغة JSON مطابقان تماماً لما استُخدما عند الإصدار الأصلي.
+    final payload = jsonEncode({
+      'v': 1,
+      'd': deviceId,
+      'iat': issuedAt,
+      'exp': expiresAt,
+      'n': licenseId,
+    });
+    final payloadBytes = utf8.encode(payload);
+    final pair = await _loadOrCreateKeyPair();
+    final signature = await _ed25519.sign(payloadBytes, keyPair: pair);
+    return 'TRIAL2.'
+        '${base64UrlEncode(payloadBytes).replaceAll('=', '')}.'
+        '${base64UrlEncode(signature.bytes).replaceAll('=', '')}';
+  }
+
   Future<String> getPublicKey() async {
     final pair = await _loadOrCreateKeyPair();
     final publicKey = await pair.extractPublicKey();
