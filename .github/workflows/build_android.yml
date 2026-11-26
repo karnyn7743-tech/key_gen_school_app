@@ -90,6 +90,9 @@ jobs:
 
       - name: Locate and Verify APK and Signing Certificate
         shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           set -euo pipefail
           mkdir -p build/app/outputs/flutter-apk
@@ -100,18 +103,32 @@ jobs:
             exit 1
           fi
           cp "$APK" build/app/outputs/flutter-apk/app-release.apk
-          test -s build/app/outputs/flutter-apk/app-release.apk
-          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner" verify --verbose build/app/outputs/flutter-apk/app-release.apk
-          CERT_DIGEST="$("$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print tolower($2)}')"
-          EXPECTED_DIGEST="072dcc321b2bbd21ec64f78830a8192063c2e148e4591761356cfd06a4d970a4"
-          if [ "$CERT_DIGEST" != "$EXPECTED_DIGEST" ]; then
-            echo "APK signing certificate does not match the configured permanent release key."
-            echo "Actual certificate SHA-256: $CERT_DIGEST"
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK_PATH"
+          BUILD_TOOLS_VERSION="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner"
+          "$APKSIGNER" verify --verbose "$APK_PATH"
+
+          # Derive the expected certificate digest directly from the configured
+          # keystore, then capture apksigner output from both stdout and stderr.
+          EXPECTED_DIGEST="$(keytool -exportcert -keystore android/app/keygen-upload-keystore.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" | sha256sum | awk '{print tolower($1)}')"
+          CERT_OUTPUT="$("$APKSIGNER" verify --print-certs "$APK_PATH" 2>&1)"
+          CERT_DIGEST="$(printf '%s\n' "$CERT_OUTPUT" | sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]:]+).*/\1/p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+
+          if [ -z "$CERT_DIGEST" ]; then
+            echo "Could not extract the APK signing certificate digest."
+            printf '%s\n' "$CERT_OUTPUT"
             exit 1
           fi
-          echo "APK signature and expected release certificate verified."
-          file build/app/outputs/flutter-apk/app-release.apk
-          ls -lh build/app/outputs/flutter-apk/app-release.apk
+          if [ "$CERT_DIGEST" != "$EXPECTED_DIGEST" ]; then
+            echo "APK signing certificate does not match the configured keystore."
+            echo "APK certificate SHA-256: $CERT_DIGEST"
+            echo "Keystore certificate SHA-256: $EXPECTED_DIGEST"
+            exit 1
+          fi
+          echo "APK signature and configured keystore certificate verified."
+          file "$APK_PATH"
+          ls -lh "$APK_PATH"
 
       - name: Remove Signing Keystore
         if: always()
