@@ -76,7 +76,10 @@ class BackupService {
             .map((item) => Map<String, dynamic>.from(item as Map))
             .toList();
     await _registry.replaceAll(records);
-    await _registry.replacePermanentAll(permanentRecords);
+    // النسخ القديمة لا تحتوي سجل المفاتيح الدائمة؛ لا تمسح سجل الجهاز الحالي عند استعادتها.
+    if (payload['permanentRegistry'] is List) {
+      await _registry.replacePermanentAll(permanentRecords);
+    }
     await _generator.restorePrivateSeed(payload['privateSeed'] as String);
   }
 
