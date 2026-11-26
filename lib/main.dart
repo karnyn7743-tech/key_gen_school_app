@@ -312,7 +312,7 @@ class _GeneratorHomePageState extends State<GeneratorHomePage> {
               ),
             ),
             const SizedBox(height: 12),
-            const LicenseHistorySection(),
+            LicenseHistorySection(key: ValueKey(_generatedKey)),
             const SizedBox(height: 12),
             Card(
               child: Padding(
