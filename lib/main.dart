@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'license_history_section.dart';
 import 'services/backup_service.dart';
 import 'services/license_generator_service.dart';
 import 'services/registry_service.dart';
@@ -114,6 +115,11 @@ class _GeneratorHomePageState extends State<GeneratorHomePage> {
         final id = _deviceController.text.trim();
         if (id.isEmpty) throw Exception('أدخل معرّف الجهاز أولاً.');
         final code = _generator.generatePermanentCode(id);
+        await _registry.addPermanent(
+          deviceId: id,
+          code: code,
+          createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        );
         setState(() => _generatedKey = code);
       });
 
@@ -305,6 +311,8 @@ class _GeneratorHomePageState extends State<GeneratorHomePage> {
                 ),
               ),
             ),
+            const SizedBox(height: 12),
+            const LicenseHistorySection(),
             const SizedBox(height: 12),
             Card(
               child: Padding(
