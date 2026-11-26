@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class RegistryService {
   static const String _storageKey = 'schoolapp_trial_registry_v1';
+  static const String _permanentStorageKey = 'schoolapp_permanent_registry_v1';
 
   Future<List<Map<String, dynamic>>> readAll() async {
     final prefs = await SharedPreferences.getInstance();
@@ -20,6 +21,56 @@ class RegistryService {
   }
 
   Future<int> count() async => (await readAll()).length;
+
+  Future<List<Map<String, dynamic>>> readPermanentAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_permanentStorageKey);
+    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
+    final decoded = jsonDecode(raw);
+    if (decoded is! List) {
+      throw const FormatException('سجل المفاتيح الدائمة المحلي غير صالح.');
+    }
+    return decoded
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  Future<void> addPermanent({
+    required String deviceId,
+    required String code,
+    required int createdAt,
+  }) async {
+    final records = await readPermanentAll();
+    final index = records.indexWhere((r) => r['deviceId'] == deviceId);
+    final record = <String, dynamic>{
+      'deviceId': deviceId,
+      'code': code,
+      'createdAt': createdAt,
+    };
+    if (index >= 0) {
+      records[index] = record;
+    } else {
+      records.add(record);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final ok = await prefs.setString(_permanentStorageKey, jsonEncode(records));
+    if (!ok) throw Exception('تعذر حفظ سجل المفاتيح الدائمة.');
+  }
+
+  Future<void> replacePermanentAll(List<Map<String, dynamic>> records) async {
+    final seen = <String>{};
+    for (final record in records) {
+      final id = record['deviceId'];
+      if (id is! String || id.trim().isEmpty || !seen.add(id) ||
+          record['code'] is! String || record['createdAt'] is! int) {
+        throw const FormatException('سجل المفاتيح الدائمة في النسخة الاحتياطية غير صالح.');
+      }
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final ok = await prefs.setString(_permanentStorageKey, jsonEncode(records));
+    if (!ok) throw Exception('تعذر استعادة سجل المفاتيح الدائمة.');
+  }
 
   Future<bool> hasDevice(String deviceId) async {
     final normalized = deviceId.trim();
